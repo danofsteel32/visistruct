@@ -1,0 +1,63 @@
+[build-system]
+requires = [
+    "setuptools>=61.0.0",
+    "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visistruct"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+authors = [{name = "Dan Davis", email = "dan@dandavis.dev"}]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+keywords = []
+dependencies = [
+    "construct",
+    "rich"
+]
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "flake8",
+    "flake8-isort",
+    "flake8-docstrings",
+    "mypy",
+    "pytest",
+    "tox"
+]
+doc = [
+    "pdoc"
+]
+
+[project.urls]
+Homepage = "https://github.com/danofsteel32/visistruct"
+
+# [project.scripts]
+# visistruct = "visistruct.cli:run"
+
+[tool.isort]
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+
+[tool.mypy]
+exclude = ["venv/"]
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "tests/*"
+disallow_untyped_defs = false
