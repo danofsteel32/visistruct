@@ -1,6 +1,7 @@
-"""The main `VisiStruct` class.
+"""Source for the `VisiStruct` class.
 
-Takes a Construct and either a built bytes array or a parsed Container.
+Would ideally like to remove the rich dependency but still support the
+rich console protocol.
 """
 
 import itertools
@@ -15,12 +16,9 @@ import construct as c
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.text import Text
 
-# console = Console()
-
-NO_COLOR = os.getenv("NO_COLOR")
 DEBUG = int(os.getenv("DEBUG", 0))
 
-NUM_TYPES = {
+NUMBER_TYPES = {
     # unsigned big
     ">B": "Int8ub",
     ">H": "Int16ub",
@@ -98,6 +96,7 @@ class Field:
     color: str = ""
 
     def _make_string(self) -> str:
+        """Created the formatted string used by __str__ and __rich__ methods."""
         indentation = "  " * (self.nested + 1)
         s = (
             f"{indentation}{self.name} {self.type} : {self.value} | "
@@ -122,11 +121,7 @@ class VisiStruct:
     parsed construct, try to work out the type, size, and offsets of every
     subconstruct.
 
-    I think will implement __str__ for normal unstylized printing and
-    __rich_console__ for the colors, fancy tree, and byte array.
-
-    Notes:
-        - set NO_COLOR=1 to disable colored output
+    Note:
         - set DEBUG=1 to print details for every SubConstruct
     """
 
@@ -191,6 +186,7 @@ class VisiStruct:
                         else:
                             raise ValueError("No strings in namespace?")
 
+                        # transforms to get the actual value not container
                         if isinstance(value, c.Container):
                             value = value[name]
                         if isinstance(value, c.ListContainer):
@@ -198,16 +194,15 @@ class VisiStruct:
                     else:
                         value = self.parsed[name]
 
-            # transforms to get the actual desired value not a container type
             if isinstance(value, c.EnumIntegerString):
                 value = str(value)
 
             if DEBUG:
                 print()
-                print(f"SUB: {sub}")
-                print(f"NAME: {name}")
-                print(f"TYPES: {types}")
-                print(f"Value: {value} {type(value)}")
+                print(f"SUB      : {sub}")
+                print(f"NAME     : {name}")
+                print(f"TYPES    : {types}")
+                print(f"VALUE    : {value} {type(value)}")
                 print(f"NAMESPACE: {namespace} nested={nested}")
 
             # by this point we know what (name, value, parent, nested) are so
@@ -223,10 +218,10 @@ class VisiStruct:
             elif "FormatField" in types and "Array" not in types:
                 if "Enum" in types:
                     f_type = sub.subcon.subcon.fmtstr
-                    f_type = f"Enum({NUM_TYPES[f_type]})"
+                    f_type = f"Enum({NUMBER_TYPES[f_type]})"
                     length = sub.subcon.subcon.length
                 else:
-                    f_type = NUM_TYPES[sub.subcon.fmtstr]
+                    f_type = NUMBER_TYPES[sub.subcon.fmtstr]
                     length = sub.subcon.length
                 field = p_field(type=f_type, length=length)
                 fields.append(field)
@@ -275,7 +270,7 @@ class VisiStruct:
 
             # array of simple types
             elif "Array" in types and "FormatField" in types:
-                f_type = f"Array[{NUM_TYPES[sub.subcon.subcon.fmtstr]}]"
+                f_type = f"Array[{NUMBER_TYPES[sub.subcon.subcon.fmtstr]}]"
                 length = sub.count * sub.subcon.subcon.length
                 field = p_field(type=f_type, length=length)
                 fields.append(field)
@@ -295,8 +290,7 @@ class VisiStruct:
         for f in fields:
             offset += f.length
             f.offset = offset
-            if not NO_COLOR:
-                f.color = next(color_wheel)
+            f.color = next(color_wheel)
         self.fields = fields
         return fields
 
@@ -329,7 +323,7 @@ class VisiStruct:
                 except StopIteration:
                     pass
             text = Text(f" {as_hex[n : n + 2]} ")
-            if n < padded and not NO_COLOR:
+            if n < padded:
                 text.stylize(f"{field.color}")
             out.append(text)
             # print(n, text, padded)
@@ -363,7 +357,6 @@ class VisiStruct:
                 yield Text(f"{indentation}{field.parent}:", style="bold")
                 parent = field.parent
             yield field
-        yield "\n"
         for chunk in self.chunk_bytes(width):
             text = Text()
             [text.append(c) for c in chunk]

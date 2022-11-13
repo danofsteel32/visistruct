@@ -14,7 +14,7 @@ from rich.console import Console
 from visistruct import VisiStruct
 
 PRINT = int(os.getenv("PRINT", 0))
-console = Console()
+console = Console(color_system="256")
 
 
 @pytest.fixture
@@ -124,6 +124,7 @@ def test_array(array_struct):
     v = VisiStruct(format, raw)
     if PRINT:
         console.print(v)
+        print()
         print(v)
 
 
@@ -137,6 +138,7 @@ def test_heavily_nested(heavily_nested):
     assert len(v.fields) == 5
     if PRINT:
         console.print(v)
+        print()
         print(v)
 
 
@@ -149,6 +151,7 @@ def test_simple(simple_struct):
     assert len(v.fields) == 6
     if PRINT:
         console.print(v)
+        print()
         print(v)
 
 
@@ -176,4 +179,5 @@ def test_strings(all_string_types_struct):
     assert len(v.fields) == 12  # 3 string types * 4 encodings
     if PRINT:
         console.print(v)
+        print()
         print(v)
