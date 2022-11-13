@@ -1,16 +1,20 @@
 """Tests for the `VisiStruct` class.
 
-Notes:
-    - move fixtures to conftest
+Move fixtures to an example_structs.py and then can use them multiple ways
 """
+import os
 import random
 from functools import partial
 from typing import Tuple
 
 import construct as c
 import pytest
+from rich.console import Console
 
 from visistruct import VisiStruct
+
+PRINT = int(os.getenv("PRINT", 0))
+console = Console()
 
 
 @pytest.fixture
@@ -118,9 +122,9 @@ def array_struct():
 def test_array(array_struct):
     format, raw = array_struct
     v = VisiStruct(format, raw)
-    v.create_fields()
-    for field in v.fields:
-        print(field)
+    if PRINT:
+        console.print(v)
+        print(v)
 
 
 def test_heavily_nested(heavily_nested):
@@ -131,6 +135,9 @@ def test_heavily_nested(heavily_nested):
     # for field in v.fields:
     #     print(field)
     assert len(v.fields) == 5
+    if PRINT:
+        console.print(v)
+        print(v)
 
 
 def test_simple(simple_struct):
@@ -140,15 +147,18 @@ def test_simple(simple_struct):
     # for field in v.fields:
     #     print(field)
     assert len(v.fields) == 6
+    if PRINT:
+        console.print(v)
+        print(v)
 
 
 def test_strings(all_string_types_struct):
     format, raw = all_string_types_struct
     decodings = {"u32": "utf-32", "u16": "utf-16", "u8": "utf-8", "ascii": "ascii"}
-    con = VisiStruct(format, raw)
+    v = VisiStruct(format, raw)
 
     offset = 0
-    for field in con.create_fields():
+    for field in v.create_fields():
         dec = decodings[field.name.split("_")[-1]]
         b = raw[offset : offset + field.length]
         offset = field.offset
@@ -163,35 +173,7 @@ def test_strings(all_string_types_struct):
         # print(len(b), b, " | ", to_string)
         # print(field.name, field.value, to_string, len(to_string))
     assert len(raw) == offset
-    assert len(con.fields) == 12  # 3 string types * 4 encodings
-
-
-if __name__ == "__main__":
-    format = c.Struct(
-        "sz_custom_array" / c.Int32sb,
-        "custom_array"
-        / c.Array(
-            c.this.sz_custom_array,
-            c.Struct(
-                "a_flag" / c.Enum(c.Int8sb, ONE=1, TWO=2, THREE=3, FOUR=4),
-                "nested_custom_array" / c.Float32l[3],
-            ),
-        ),
-    )
-    custom_array = []
-    for n in range(4):
-        custom_array.append(
-            dict(
-                a_flag=n + 1,
-                nested_custom_array=[random.uniform(-10, 10) for _ in range(3)]
-            )
-        )
-    args = dict(
-        sz_custom_array=4,
-        custom_array=custom_array
-    )
-    v = VisiStruct(format, format.build(args))
-    v.create_fields()
-    # for field in v.fields:
-    #     print(field)
-    v.print()
+    assert len(v.fields) == 12  # 3 string types * 4 encodings
+    if PRINT:
+        console.print(v)
+        print(v)

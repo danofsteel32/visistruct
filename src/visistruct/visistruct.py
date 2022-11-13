@@ -12,14 +12,15 @@ from functools import partial, reduce
 from typing import Any, Generator, List, Optional, Tuple, Union
 
 import construct as c
-from rich.console import Console
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.text import Text
 
-console = Console()
+# console = Console()
 
 NO_COLOR = os.getenv("NO_COLOR")
+DEBUG = int(os.getenv("DEBUG", 0))
 
-FORMAT_CHAR = {
+NUM_TYPES = {
     # unsigned big
     ">B": "Int8ub",
     ">H": "Int16ub",
@@ -85,7 +86,7 @@ def tokens(text: str) -> Generator[Tuple[str, str], None, None]:
 
 @dataclass
 class Field:
-    """Used instead of a dict, its just a container."""
+    """Holds data about each field in the Construct."""
 
     name: str
     type: str
@@ -93,15 +94,24 @@ class Field:
     value: Any
     parent: str = ""
     nested: int = 0
-    offset: int = 0  # has to be set later
+    offset: int = 0
     color: str = ""
 
+    def _make_string(self) -> str:
+        indentation = "  " * (self.nested + 1)
+        s = (
+            f"{indentation}{self.name} {self.type} : {self.value} | "
+            f"sz={self.length} offset={self.offset}"
+        )
+        return s
+
+    def __str__(self) -> str:
+        return self._make_string()
+
     def __rich__(self) -> Text:
-        indentation = "  " * self.nested + "  "
-        s = f"{indentation}{self.name}: {self.value} (type={self.type} sz={self.length} offset={self.offset})"  # noqa: E501
-        text = Text(s)
+        text = Text(self._make_string())
         if self.color:
-            text.style = f"bold {self.color}"
+            text.stylize(f"{self.color}")
         return text
 
 
@@ -112,8 +122,12 @@ class VisiStruct:
     parsed construct, try to work out the type, size, and offsets of every
     subconstruct.
 
+    I think will implement __str__ for normal unstylized printing and
+    __rich_console__ for the colors, fancy tree, and byte array.
+
     Notes:
         - set NO_COLOR=1 to disable colored output
+        - set DEBUG=1 to print details for every SubConstruct
     """
 
     def __init__(
@@ -127,11 +141,11 @@ class VisiStruct:
             raise Exception("Either raw or parsed required")
         self._raw = raw
         self._parsed = parsed
-        self.fields: List[Field]
+        self.fields: List[Field] = []
 
     @property
     def raw(self) -> Optional[bytes]:
-        # TODO figure out when and where to raise exc if no parsed and no raw
+        """Result of calling format.build()."""
         if not self._raw:
             if self._parsed:
                 self._raw = self.format.build(self._parsed)
@@ -139,6 +153,7 @@ class VisiStruct:
 
     @property
     def parsed(self) -> Union[c.Container, c.ListContainer]:
+        """Result of calling format.parse()."""
         if not self._parsed:
             if self._raw:
                 self._parsed = self.format.parse(self.raw)
@@ -147,7 +162,7 @@ class VisiStruct:
     def create_fields(
         self,
         subcon: Optional[c.Construct] = None,
-        namespace: Optional[List] = None,
+        namespace: Optional[List[Union[str, int]]] = None,
         nested: int = 0,
     ) -> List[Field]:
         """Called recursively until all subcons parsed."""
@@ -164,18 +179,36 @@ class VisiStruct:
                 elif kind == "name":
                     name = text
                     if namespace:
-                        # getitem for n in namespace
+                        # call self.parsed.getitem(n) for n in namespace
                         value = reduce(operator.getitem, namespace, self.parsed)
+                        # walk backwards through the namespace until hit a string
+                        # we do this because the last element in namespace can be
+                        # an integer representing the index of an array.
+                        for _name in reversed(namespace):
+                            if isinstance(_name, str):
+                                parent = _name
+                                break
+                        else:
+                            raise ValueError("No strings in namespace?")
+
                         if isinstance(value, c.Container):
                             value = value[name]
                         if isinstance(value, c.ListContainer):
                             value = [v for v in value]
-                        parent = namespace[-1] if not isinstance(namespace[-1], int) else namespace[0]
                     else:
                         value = self.parsed[name]
-            
+
+            # transforms to get the actual desired value not a container type
             if isinstance(value, c.EnumIntegerString):
                 value = str(value)
+
+            if DEBUG:
+                print()
+                print(f"SUB: {sub}")
+                print(f"NAME: {name}")
+                print(f"TYPES: {types}")
+                print(f"Value: {value} {type(value)}")
+                print(f"NAMESPACE: {namespace} nested={nested}")
 
             # by this point we know what (name, value, parent, nested) are so
             # set them here and only worry about setting the length and type below
@@ -190,10 +223,10 @@ class VisiStruct:
             elif "FormatField" in types and "Array" not in types:
                 if "Enum" in types:
                     f_type = sub.subcon.subcon.fmtstr
-                    f_type = "Enum " + FORMAT_CHAR[f_type]
+                    f_type = f"Enum({NUM_TYPES[f_type]})"
                     length = sub.subcon.subcon.length
                 else:
-                    f_type = FORMAT_CHAR[sub.subcon.fmtstr]
+                    f_type = NUM_TYPES[sub.subcon.fmtstr]
                     length = sub.subcon.length
                 field = p_field(type=f_type, length=length)
                 fields.append(field)
@@ -221,8 +254,8 @@ class VisiStruct:
                 else:
                     namespace.append(name)
                 nested += 1
-                # TODO figure out how to represent that this is nested
                 fields.extend(self.create_fields(sub.subcon.subcons, namespace, nested))
+                # reset namespace and nest level
                 namespace = None
                 nested = 0
 
@@ -232,27 +265,27 @@ class VisiStruct:
                 nested += 1
                 for idx in range(_len):
                     _namespace = namespace + [idx]
-                    fields.extend(self.create_fields(sub.subcon.subcon.subcons, namespace=_namespace, nested=nested))
+                    sub_fields = self.create_fields(
+                        sub.subcon.subcon.subcons, namespace=_namespace, nested=nested
+                    )
+                    fields.extend(sub_fields)
+                # reset namespace and nest level
                 namespace = None
                 nested = 0
 
+            # array of simple types
             elif "Array" in types and "FormatField" in types:
-                # console.print()
-                # console.print(f"SUB: {sub}")
-                # console.print("NAME", name)
-                # console.print(f"NAMESPACE: {namespace} {nested}")
-                # namespace.append(name)
-
-                f_type = f"Array[{FORMAT_CHAR[sub.subcon.subcon.fmtstr]}]"
+                f_type = f"Array[{NUM_TYPES[sub.subcon.subcon.fmtstr]}]"
                 length = sub.count * sub.subcon.subcon.length
                 field = p_field(type=f_type, length=length)
                 fields.append(field)
 
             else:
-                console.print(sub)
-                console.print(f" name: {name}")
-                console.print(f" types: {types}")
-                console.print(f" value: {value}")
+                print("UNKNOWN?")
+                print(sub)
+                print(f" name: {name}")
+                print(f" types: {types}")
+                print(f" value: {value}")
 
         # Set offsets and colors
         color_wheel = itertools.cycle(
@@ -297,28 +330,41 @@ class VisiStruct:
                     pass
             text = Text(f" {as_hex[n : n + 2]} ")
             if n < padded and not NO_COLOR:
-                text.stylize(f"bold {field.color}")
+                text.stylize(f"{field.color}")
             out.append(text)
             # print(n, text, padded)
             n += 2
         return [out[i : i + chunk_size] for i in range(0, len(out), chunk_size)]
 
-    def print(self, width: int = 8) -> None:
-        # TODO: create a rich.Tree
-        # width sets how many bytes to print per line
-        fields = self.create_fields()
+    def __str__(self) -> str:
+        fields = self.fields if self.fields else self.create_fields()
         parent = ""
-        console.print("Container:")
+        text = "Container:\n"
         for field in fields:
             indentation = "  " * field.nested
             if field.parent and field.parent != parent:
-                console.print(f"{indentation}{field.parent}:")
+                text += f"{indentation}{field.parent}:\n"
                 parent = field.parent
-            console.print(field)
-        if NO_COLOR:
-            return
-        console.print()
+            text += f"{field}\n"
+        # return text.strip()
+        return text
+
+    def __rich_console__(self, console: Console, opts: ConsoleOptions) -> RenderResult:
+        fields = self.fields if self.fields else self.create_fields()
+
+        width, _ = console.size
+        width = width // 8
+
+        parent = ""
+        yield Text("Container:", style="bold")
+        for field in fields:
+            indentation = "  " * field.nested
+            if field.parent and field.parent != parent:
+                yield Text(f"{indentation}{field.parent}:", style="bold")
+                parent = field.parent
+            yield field
+        yield "\n"
         for chunk in self.chunk_bytes(width):
             text = Text()
             [text.append(c) for c in chunk]
-            console.print(text)
+            yield text
